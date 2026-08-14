@@ -24,3 +24,15 @@ resource "aws_security_group" "lambda" {
 
   tags = { Name = "${local.name_prefix}-lambda-sg" }
 }
+
+# GAP-05 fix: a Lambda function with vpc_config requires its execution
+# role to call ec2:CreateNetworkInterface / DescribeNetworkInterfaces /
+# DeleteNetworkInterface so AWS can attach ENIs in the private subnets.
+# The starter's AWSLambdaBasicExecutionRole (main.tf) only grants
+# CloudWatch Logs permissions, not EC2 ENI permissions — apply fails with
+# "InvalidParameterValueException: The provided execution role does not
+# have permissions to call CreateNetworkInterface on EC2" without this.
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
