@@ -1,10 +1,10 @@
 # evidence_vault.tf
 # Object Lock vault for signed pipeline evidence bundles (Layer 3, Day 2,
-# writes here). Adapted from tools/terraform/primitives/evidence-vault
-# (Lab 2.5) in the GRC toolkit vault, upgraded to the capstone CMK instead
-# of AES256. COMPLIANCE mode per specs/2026-08-14-capstone-design.md —
-# GOVERNANCE's 1-day default caused a real evidence-expiry incident on
-# Lab 6.1's vault this same week.
+# writes here), upgraded to the capstone CMK instead of AES256.
+# COMPLIANCE, not GOVERNANCE: GOVERNANCE's default retention can be
+# shortened or the lock removed by a sufficiently privileged principal;
+# COMPLIANCE cannot be weakened or bypassed by anyone, including the
+# account root, until the retention period elapses. See WRITEUP.md.
 # CMMC: SC.L2-3.13.11 (encryption), covers the audit-evidence chain of
 # custody the OSCAL component (Day 2) cites.
 

@@ -22,7 +22,7 @@ resource "aws_security_group" "lambda" {
     prefix_list_ids = [aws_vpc_endpoint.s3.prefix_list_id, aws_vpc_endpoint.dynamodb.prefix_list_id]
   }
 
-  tags = { Name = "${local.name_prefix}-lambda-sg" }
+  tags = { Name = "${local.name_prefix}-lambda-sg-${local.suffix}" }
 }
 
 # GAP-05 fix: a Lambda function with vpc_config requires its execution

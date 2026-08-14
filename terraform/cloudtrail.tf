@@ -1,15 +1,19 @@
 # cloudtrail.tf
-# Multi-region management-event trail with log-file validation. Adapted
-# from tools/terraform/baselines/aws/cloudtrail.tf (Lab 5.2) in the GRC
-# toolkit vault. Own bucket, AES256 — not the capstone CMK, see
-# specs/2026-08-14-capstone-design.md "Networking addendum" for why.
+# Multi-region management-event trail with log-file validation. Own
+# bucket, AES256 — not the capstone CMK, since CloudTrail's log delivery
+# would need its own key-policy grant with a SourceArn condition to use a
+# CMK, out of scope for the five gaps this CMK exists to close.
 # CMMC: AU.L2-3.3.1 (audit record generation), covers the management-plane
 # side of the audit trail (the API-layer access-logging gap, GAP-08, is
 # deferred — see the design spec's gap-allocation table).
 
 resource "aws_s3_bucket" "trail" {
-  bucket        = "${local.name_prefix}-cloudtrail-${local.suffix}"
-  force_destroy = true
+  bucket = "${local.name_prefix}-cloudtrail-${local.suffix}"
+}
+
+resource "aws_s3_bucket_versioning" "trail" {
+  bucket = aws_s3_bucket.trail.id
+  versioning_configuration { status = "Enabled" }
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "trail" {
@@ -64,6 +68,22 @@ data "aws_iam_policy_document" "trail" {
       test     = "StringEquals"
       variable = "aws:SourceArn"
       values   = ["arn:aws:cloudtrail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:trail/${local.name_prefix}-trail"]
+    }
+  }
+
+  statement {
+    sid       = "DenyBucketDeletion"
+    effect    = "Deny"
+    actions   = ["s3:DeleteBucket"]
+    resources = [aws_s3_bucket.trail.arn]
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalArn"
+      values   = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
     }
   }
 }
