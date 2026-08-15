@@ -27,7 +27,16 @@ resource "aws_iam_role" "grc_gate_ci" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = {
         StringEquals = { "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com" }
-        StringLike   = { "token.actions.githubusercontent.com:sub" = "repo:Shayl-Taveras/cgep-app-starter:*" }
+        # GitHub's OIDC "sub" claim now embeds immutable owner/repo IDs
+        # (e.g. "repo:OWNER@<org-id>/REPO@<repo-id>:pull_request") instead
+        # of the classic "repo:OWNER/REPO:*" form. Match both so the trust
+        # policy keeps working regardless of which format GitHub issues.
+        StringLike = {
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:Shayl-Taveras/cgep-app-starter:*",
+            "repo:Shayl-Taveras@*/cgep-app-starter@*:*",
+          ]
+        }
       }
     }]
   })
