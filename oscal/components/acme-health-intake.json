@@ -1,0 +1,111 @@
+{
+  "component-definition": {
+    "uuid": "1c27dab5-076a-449f-bc1b-e34ccaeaa809",
+    "metadata": {
+      "title": "acme-health-intake v1",
+      "last-modified": "2026-08-15T00:00:00.000+00:00",
+      "version": "1.0.0",
+      "oscal-version": "1.2.1",
+      "parties": [
+        {
+          "uuid": "aa39456c-e034-441b-af14-dc2a0cec717d",
+          "type": "organization",
+          "name": "Shayl Taveras / CGE-P Capstone"
+        }
+      ]
+    },
+    "components": [
+      {
+        "uuid": "02aad885-a70e-41bd-81a3-8fda7ad0fc73",
+        "type": "software",
+        "title": "Acme Health Patient Intake API — GRC baseline",
+        "description": "Terraform GRC baseline wrapping the cgep-app-starter Patient Intake API (Lambda + API Gateway + DynamoDB + S3). Closes six of the starter's eight named compliance gaps: customer-managed KMS encryption on the PHI data stores, TLS-only bucket policy, S3 versioning, private-VPC Lambda placement with no internet egress, and least-privilege IAM. Source: terraform/kms.tf, terraform/s3_uploads_hardening.tf, terraform/dynamodb_hardening_override.tf, terraform/main_override.tf, terraform/vpc_endpoints.tf, terraform/lambda_security_group.tf.",
+        "purpose": "Make the starter's Patient Intake API audit-defensible against CMMC Level 2 without modifying the workload itself.",
+        "responsible-roles": [
+          { "role-id": "provider", "party-uuids": ["aa39456c-e034-441b-af14-dc2a0cec717d"] }
+        ],
+        "control-implementations": [
+          {
+            "uuid": "ba0084fd-322b-4cd3-a54f-4d2e22228b8a",
+            "source": "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-171/rev3/json/NIST_SP800-171_rev3_catalog.json",
+            "description": "Implementation of NIST SP 800-171 Rev 3 controls satisfied by this Terraform baseline (CMMC Level 2 declared primary framework). Evidence is captured and signed by the grc-gate GitHub Actions workflow on every merge to main and uploaded to the evidence vault under S3 Object Lock, COMPLIANCE mode, 400-day retention.",
+            "implemented-requirements": [
+              {
+                "uuid": "a647de02-4c13-444c-a28d-e10e5bd0de4a",
+                "control-id": "SP_800_171_03.13.11",
+                "description": "GAP-01: the starter's S3 uploads bucket relied on AWS-managed SSE-S3. aws_s3_bucket_server_side_encryption_configuration.uploads now enforces SSE-KMS against a customer-managed key (aws_kms_key.capstone), giving PHI key custody to the account rather than AWS. Gated in CI by Conftest namespace compliance.sc_13_11_s3_encryption.",
+                "props": [
+                  { "name": "implementation-status", "value": "implemented" },
+                  { "name": "terraform-resource", "value": "aws_s3_bucket_server_side_encryption_configuration.uploads" }
+                ],
+                "links": [
+                  { "rel": "evidence", "href": "s3://acme-health-intake-evidence-vault-da40cebe/runs/31912403798/evidence-31912403798-5a509fc7f48866359884638a5466c3e1137c52e7.tar.gz", "text": "Signed grc-gate pipeline bundle containing terraform plan.json, plan.txt, and conftest-results.json. Retained under COMPLIANCE lock for 400 days." }
+                ]
+              },
+              {
+                "uuid": "5e0b4f12-e068-4e97-9b33-fdeb2e381962",
+                "control-id": "SP_800_171_03.13.11",
+                "description": "GAP-02: the starter's DynamoDB submissions table used the AWS-owned default key. A server_side_encryption block on aws_dynamodb_table.intake (added via a Terraform override file, since encryption is an attribute of the table resource itself, not a separate resource type) now points at the same customer-managed CMK as GAP-01. Gated in CI by Conftest namespace compliance.sc_13_11_dynamodb_encryption.",
+                "props": [
+                  { "name": "implementation-status", "value": "implemented" },
+                  { "name": "terraform-resource", "value": "aws_dynamodb_table.intake" }
+                ],
+                "links": [
+                  { "rel": "evidence", "href": "s3://acme-health-intake-evidence-vault-da40cebe/runs/31912403798/evidence-31912403798-5a509fc7f48866359884638a5466c3e1137c52e7.tar.gz", "text": "Signed grc-gate pipeline bundle containing terraform plan.json, plan.txt, and conftest-results.json. Retained under COMPLIANCE lock for 400 days." }
+                ]
+              },
+              {
+                "uuid": "becb7a9d-1aed-497c-8606-028b8b3004f1",
+                "control-id": "SP_800_171_03.13.08",
+                "description": "GAP-03: the starter's uploads bucket had no policy denying non-TLS requests. aws_s3_bucket_policy.uploads_tls_only denies s3:* on the bucket and its objects when aws:SecureTransport is false. Gated in CI by Conftest namespace compliance.sc_13_8_tls_enforcement (existence-based check — see policies/sc_13_8_tls_enforcement.rego's own comment for why this policy verifies the resource exists rather than parsing the rendered policy JSON).",
+                "props": [
+                  { "name": "implementation-status", "value": "implemented" },
+                  { "name": "terraform-resource", "value": "aws_s3_bucket_policy.uploads_tls_only" }
+                ],
+                "links": [
+                  { "rel": "evidence", "href": "s3://acme-health-intake-evidence-vault-da40cebe/runs/31912403798/evidence-31912403798-5a509fc7f48866359884638a5466c3e1137c52e7.tar.gz", "text": "Signed grc-gate pipeline bundle containing terraform plan.json, plan.txt, and conftest-results.json. Retained under COMPLIANCE lock for 400 days." }
+                ]
+              },
+              {
+                "uuid": "235d5f98-79a1-48c2-96b1-79e705463105",
+                "control-id": "SP_800_171_03.08.09",
+                "description": "GAP-04: the starter's uploads bucket had no versioning, so PHI overwrites were unrecoverable. aws_s3_bucket_versioning.uploads sets status Enabled. Mapped to 03.08.09 (System Backup - Cryptographic Protection, media-protection family) as the closest fit in the 800-171 Rev 3 control set: this is an interpretation, not a literal text match — versioning is treated here as S3's storage-native recovery mechanism for accidental overwrite, in the same family as backup protection, rather than a formal backup process. Gated in CI by Conftest namespace compliance.mp_3_8_9_versioning.",
+                "props": [
+                  { "name": "implementation-status", "value": "implemented" },
+                  { "name": "terraform-resource", "value": "aws_s3_bucket_versioning.uploads" }
+                ],
+                "links": [
+                  { "rel": "evidence", "href": "s3://acme-health-intake-evidence-vault-da40cebe/runs/31912403798/evidence-31912403798-5a509fc7f48866359884638a5466c3e1137c52e7.tar.gz", "text": "Signed grc-gate pipeline bundle containing terraform plan.json, plan.txt, and conftest-results.json. Retained under COMPLIANCE lock for 400 days." }
+                ]
+              },
+              {
+                "uuid": "a9f4e68c-cd88-46e6-b026-219a5c36b3d1",
+                "control-id": "SP_800_171_03.13.01",
+                "description": "GAP-05: the starter's Lambda ran in the default Lambda network, not the VPC it provisions. aws_lambda_function.intake now has a vpc_config placing it in both private subnets behind a security group whose only egress rule is scoped to the S3 and DynamoDB VPC gateway-endpoint prefix lists on port 443 - no NAT Gateway exists and no 0.0.0.0/0 route exists anywhere in the private route table, so the function has no internet egress path at all, not just a private IP. Gated in CI by Conftest namespace compliance.sc_13_1_vpc_boundary.",
+                "props": [
+                  { "name": "implementation-status", "value": "implemented" },
+                  { "name": "terraform-resource", "value": "aws_lambda_function.intake" }
+                ],
+                "links": [
+                  { "rel": "evidence", "href": "s3://acme-health-intake-evidence-vault-da40cebe/runs/31912403798/evidence-31912403798-5a509fc7f48866359884638a5466c3e1137c52e7.tar.gz", "text": "Signed grc-gate pipeline bundle containing terraform plan.json, plan.txt, and conftest-results.json. Retained under COMPLIANCE lock for 400 days." }
+                ]
+              },
+              {
+                "uuid": "094243be-36c8-4399-82a4-c8a5a97f39c9",
+                "control-id": "SP_800_171_03.01.05",
+                "description": "GAP-07: the starter's Lambda execution role had dynamodb:* and s3:* on the workload's data stores. aws_iam_role_policy.lambda_inline now grants exactly dynamodb:PutItem, s3:PutObject (scoped to the uploads/ key prefix), and the two KMS actions the CMK requires - no wildcard action remains. Gated in CI by Conftest namespace compliance.ac_1_5_least_privilege, which parses the rendered policy JSON and fails on any \"service:*\" action.",
+                "props": [
+                  { "name": "implementation-status", "value": "implemented" },
+                  { "name": "terraform-resource", "value": "aws_iam_role_policy.lambda_inline" }
+                ],
+                "links": [
+                  { "rel": "evidence", "href": "s3://acme-health-intake-evidence-vault-da40cebe/runs/31912403798/evidence-31912403798-5a509fc7f48866359884638a5466c3e1137c52e7.tar.gz", "text": "Signed grc-gate pipeline bundle containing terraform plan.json, plan.txt, and conftest-results.json. Retained under COMPLIANCE lock for 400 days." }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
