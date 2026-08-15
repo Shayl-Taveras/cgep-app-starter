@@ -78,3 +78,39 @@ cgep-app-starter/
 ## License
 
 MIT. Fork freely. Submissions remain learners' own work.
+
+## Capstone verification (for the grader)
+
+This repo is a fork of `GRCEngClub/cgep-app-starter`, wrapped with a CMMC
+Level 2 GRC baseline. Primary framework and full design reasoning: see
+`WRITEUP.md`.
+
+1. **Terraform baseline** — `terraform/kms.tf`, `terraform/evidence_vault.tf`,
+   `terraform/cloudtrail.tf`, `terraform/vpc_endpoints.tf`,
+   `terraform/s3_uploads_hardening.tf`,
+   `terraform/dynamodb_hardening_override.tf`, `terraform/main_override.tf`,
+   `terraform/lambda_security_group.tf`, `terraform/github_oidc.tf`,
+   `terraform/backend.tf`, `terraform/backend_bootstrap.tf` — all
+   additions, the starter's own `main.tf` / `variables.tf` / `outputs.tf`
+   are untouched.
+2. **Policy suite** — `opa test policies/` (6 policies, 15 tests, all
+   passing).
+3. **Pipeline** — `.github/workflows/grc-gate.yml`. See PR #1 (merged,
+   triggered the full pipeline including the post-merge apply, sign, and
+   evidence upload) and PR #2 (`[DEMO — do not merge] Reintroduce GAP-01
+   to prove the gate fires`, blocked by the Conftest policy gate citing
+   SC.L2-3.13.11, closed unmerged) for the gate working both directions.
+4. **Signed evidence** — `s3://acme-health-intake-evidence-vault-da40cebe/runs/31912403798/`.
+   Verify:
+   ```
+   cosign verify-blob --bundle evidence-31912403798-5a509fc7f48866359884638a5466c3e1137c52e7.tar.gz.sig.bundle \
+     --certificate-identity-regexp "https://github.com/Shayl-Taveras/cgep-app-starter/.github/workflows/grc-gate.yml@.*" \
+     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+     evidence-31912403798-5a509fc7f48866359884638a5466c3e1137c52e7.tar.gz
+   ```
+5. **OSCAL** — `oscal/components/acme-health-intake.json`,
+   `oscal/profiles/cmmc-l2-minimum.json`. Validate:
+   ```
+   trestle validate -f component-definitions/acme-health-intake/component-definition.json
+   ```
+   (see `oscal/evidence/trestle-validate.txt` for a captured run).
