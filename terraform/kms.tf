@@ -38,6 +38,18 @@ resource "aws_kms_key" "capstone" {
         ]
         Resource = "*"
       },
+      {
+        Sid       = "AllowCiRoleUsage"
+        Effect    = "Allow"
+        Principal = { AWS = aws_iam_role.grc_gate_ci.arn }
+        Action = [
+          "kms:Decrypt",
+          "kms:GenerateDataKey",
+          "kms:Encrypt",
+          "kms:DescribeKey",
+        ]
+        Resource = "*"
+      },
     ]
   })
 }

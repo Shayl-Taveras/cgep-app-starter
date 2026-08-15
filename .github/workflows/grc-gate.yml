@@ -1,0 +1,156 @@
+# Control Coverage: CM-3, CM-6, CA-2, CA-7, AU-9 (evidence chain of custody)
+# Framework: CMMC Level 2 — AC.L2-3.1.5, SC.L2-3.13.1/8/11, MP.L2-3.8.9
+name: grc-gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-1
+  TF_WORKING_DIR: terraform
+  POLICY_DIR: policies
+
+jobs:
+  grc-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.1
+          terraform_wrapper: false
+
+      - name: Install Conftest
+        run: |
+          curl -fsSL https://github.com/open-policy-agent/conftest/releases/download/v0.50.0/conftest_0.50.0_Linux_x86_64.tar.gz \
+            | tar -xz -C /usr/local/bin conftest
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.2.4'
+
+      # Step 1/5: Plan
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          set -o pipefail
+          terraform init -input=false
+          terraform validate
+          terraform plan -out=tfplan -no-color 2>&1 | tee plan.txt
+          terraform show -json tfplan > plan.json
+
+      # Step 2/5: Policy check
+      - name: Conftest policy gate
+        id: conftest
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/evidence
+          {
+            echo "["
+            FIRST=1
+            for ns in compliance.sc_13_11_s3_encryption compliance.sc_13_11_dynamodb_encryption compliance.sc_13_8_tls_enforcement compliance.mp_3_8_9_versioning compliance.sc_13_1_vpc_boundary compliance.ac_1_5_least_privilege; do
+              [[ $FIRST -eq 1 ]] && FIRST=0 || printf ","
+              conftest test \
+                --policy $GITHUB_WORKSPACE/${{ env.POLICY_DIR }} \
+                --namespace "$ns" \
+                --output=json plan.json || true
+            done
+            echo "]"
+          } > $GITHUB_WORKSPACE/evidence/conftest-results.json
+          python3 <<'PYEOF'
+          import json, sys, os
+          d = json.load(open(os.environ["GITHUB_WORKSPACE"] + "/evidence/conftest-results.json"))
+          fails = sum(len(r.get("failures") or []) for results in d for r in results)
+          print(f"conftest failures: {fails}")
+          sys.exit(0 if fails == 0 else 1)
+          PYEOF
+
+      - name: Copy plan into evidence
+        if: always()
+        run: |
+          mkdir -p evidence
+          cp ${{ env.TF_WORKING_DIR }}/plan.json evidence/plan.json
+          cp ${{ env.TF_WORKING_DIR }}/plan.txt evidence/plan.txt
+
+      # Step 3/5: Apply — only on push to main (i.e. after a PR has already
+      # merged), never on a pull_request event. This is what makes the PR
+      # gate meaningful: a PR cannot mutate AWS, only a merge can.
+      - name: Terraform apply
+        id: apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform apply -auto-approve tfplan
+          terraform show -json > ../evidence/post-apply-state.json
+
+      # Step 4/5: Sign — keyless via GitHub OIDC (Sigstore Fulcio), same
+      # id-token as the AWS federation above but a different relying party.
+      # Only meaningful once there's a real applied bundle, so gated the
+      # same as Apply.
+      - name: Sign evidence bundle
+        id: sign
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BUNDLE="evidence-${RUN_ID}-${SHA}.tar.gz"
+          ( cd evidence && tar czf "../${BUNDLE}" . )
+          shasum -a 256 "${BUNDLE}" | awk '{print $1}' > "${BUNDLE}.sha256"
+          cosign sign-blob --yes --bundle "${BUNDLE}.sig.bundle" "${BUNDLE}"
+          echo "bundle=${BUNDLE}" >> "$GITHUB_OUTPUT"
+
+      # Step 5/5: Upload — to Layer 1's evidence vault (Object Lock,
+      # COMPLIANCE mode — this upload is permanent for 400 days).
+      - name: Upload to evidence vault
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          VAULT: ${{ vars.EVIDENCE_VAULT }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          BUNDLE: ${{ steps.sign.outputs.bundle }}
+        run: |
+          set -euo pipefail
+          KEY_PREFIX="runs/${RUN_ID}"
+          aws s3 cp "${BUNDLE}"            "s3://${VAULT}/${KEY_PREFIX}/${BUNDLE}"
+          aws s3 cp "${BUNDLE}.sha256"     "s3://${VAULT}/${KEY_PREFIX}/${BUNDLE}.sha256"
+          aws s3 cp "${BUNDLE}.sig.bundle" "s3://${VAULT}/${KEY_PREFIX}/${BUNDLE}.sig.bundle"
+          VERSION_ID=$(aws s3api head-object --bucket "${VAULT}" --key "${KEY_PREFIX}/${BUNDLE}" --query VersionId --output text)
+          cat > receipt.json <<EOF
+          {
+            "run_id":"${RUN_ID}",
+            "vault":"${VAULT}",
+            "bundle_key":"${KEY_PREFIX}/${BUNDLE}",
+            "version_id":"${VERSION_ID}",
+            "sha256":"$(cat ${BUNDLE}.sha256)",
+            "commit":"${SHA}"
+          }
+          EOF
+          aws s3 cp receipt.json "s3://${VAULT}/${KEY_PREFIX}/receipt.json"
+
+      - name: Upload evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grc-evidence-${{ github.run_id }}
+          path: evidence/
+          retention-days: 90
