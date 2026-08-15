@@ -64,6 +64,7 @@ resource "aws_iam_role_policy" "grc_gate_ci" {
           "kms:Describe*",
           "kms:List*",
           "kms:GetKeyPolicy",
+          "kms:GetKeyRotationStatus",
           "iam:Get*",
           "iam:List*",
           "cloudtrail:Describe*",
